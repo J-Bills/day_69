@@ -1,11 +1,11 @@
 from datetime import date
-from flask import Flask, abort, render_template, redirect, url_for, flash
+from flask import Flask, abort, render_template, redirect, url_for, flash, request
 from flask_bootstrap import Bootstrap5
 from flask_ckeditor import CKEditor
 from flask_gravatar import Gravatar
 from flask_login import UserMixin, login_user, LoginManager, current_user, logout_user, login_required
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column, configure_mappers
 from sqlalchemy import Integer, String, Text, ForeignKey
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -32,6 +32,7 @@ ckeditor = CKEditor(app)
 Bootstrap5(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
+gravatar = Gravatar(app)
 
 # TODO: Configure Flask-Login
 
@@ -45,6 +46,7 @@ db.init_app(app)
 
 
 # CONFIGURE TABLES
+
 class BlogPost(db.Model):
     __tablename__ = 'blog_posts'
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -66,6 +68,14 @@ class User(UserMixin, db.Model):
     email: Mapped[str] = mapped_column(String(250), nullable=False)
     password: Mapped[str] = mapped_column(String(250), nullable=False)
     blogs = relationship('BlogPost', back_populates="author")
+
+
+class Comment(db.Model):
+    __tablename__ = 'comments'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    comment: Mapped[str] = mapped_column(String(250), nullable=False)
+
+configure_mappers()
 
 with app.app_context():
     db.create_all()
@@ -138,12 +148,24 @@ def get_all_posts():
     posts = result.scalars().all()
     return render_template("index.html", all_posts=posts, logged_in=current_user.is_authenticated)
 
-@login_required
+
 # TODO: Allow logged-in users to comment on posts
-@app.route("/post/<int:post_id>")
+@login_required
+@app.route("/post/<int:post_id>", methods=['GET', 'POST'])
 def show_post(post_id):
+    form = CommentForm()
     requested_post = db.get_or_404(BlogPost, post_id)
-    return render_template("post.html", post=requested_post)
+    if request.method == 'POST' and form.validate_on_submit():
+        com = Comment(
+            comment=form.comment.data,
+        )
+        db.session.add(com)
+        db.session.commit()
+        return redirect(url_for('show_post', post=requested_post, form=form, logged_in=current_user.is_authenticated))
+    if not current_user.is_authenticated:
+        flash('You need to login to be able to send comments')
+        return redirect(url_for('login'))
+    return render_template("post.html", post=requested_post, form=form, logged_in=current_user.is_authenticated)
 
 
 # TODO: Use a decorator so only an admin user can create a new post
