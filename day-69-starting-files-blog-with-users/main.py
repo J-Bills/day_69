@@ -6,7 +6,7 @@ from flask_gravatar import Gravatar
 from flask_login import UserMixin, login_user, LoginManager, current_user, logout_user, login_required
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import Integer, String, Text, ForeignKey
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 # Import your forms from the forms.py
@@ -46,30 +46,45 @@ db.init_app(app)
 
 # CONFIGURE TABLES
 class BlogPost(db.Model):
+    __tablename__ = 'blog_posts'
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(250), unique=True, nullable=False)
     subtitle: Mapped[str] = mapped_column(String(250), nullable=False)
     date: Mapped[str] = mapped_column(String(250), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    author: Mapped[str] = mapped_column(String(250), nullable=False)
+    author_id: Mapped[int] = mapped_column(Integer, ForeignKey('user.id'))
+    author = relationship('User', back_populates="user")
     img_url: Mapped[str] = mapped_column(String(250), nullable=False)
 
 
 # TODO: Create a User table for all your registered users. 
 
 class User(UserMixin, db.Model):
+    __tablename__ = 'user'
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(250), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(250), nullable=False)
     password: Mapped[str] = mapped_column(String(250), nullable=False)
+    blogs = relationship('BlogPost', back_populates="author")
 
 with app.app_context():
     db.create_all()
 
 
+
 @login_manager.user_loader
 def load_user(user_id):
     return db.get_or_404(User, user_id)
+
+def admin_only(function):
+    def wrapped(*args, **kwargs):
+        #do something before
+        if current_user.id == 1:
+            return function(*args, **kwargs)
+        else:
+            abort(403)
+        #do something after
+    return wrapped
 
 
 # TODO: Use Werkzeug to hash the user's password when creating a new user.
@@ -121,7 +136,7 @@ def logout():
 def get_all_posts():
     result = db.session.execute(db.select(BlogPost))
     posts = result.scalars().all()
-    return render_template("index.html", all_posts=posts, user = current_user, logged_in=True)
+    return render_template("index.html", all_posts=posts, logged_in=current_user.is_authenticated)
 
 @login_required
 # TODO: Allow logged-in users to comment on posts
@@ -132,6 +147,7 @@ def show_post(post_id):
 
 
 # TODO: Use a decorator so only an admin user can create a new post
+@admin_only
 @app.route("/new-post", methods=["GET", "POST"])
 def add_new_post():
     form = CreatePostForm()
@@ -151,6 +167,7 @@ def add_new_post():
 
 
 # TODO: Use a decorator so only an admin user can edit a post
+@admin_only
 @app.route("/edit-post/<int:post_id>", methods=["GET", "POST"])
 def edit_post(post_id):
     post = db.get_or_404(BlogPost, post_id)
@@ -173,6 +190,7 @@ def edit_post(post_id):
 
 
 # TODO: Use a decorator so only an admin user can delete a post
+@admin_only
 @app.route("/delete/<int:post_id>")
 def delete_post(post_id):
     post_to_delete = db.get_or_404(BlogPost, post_id)
